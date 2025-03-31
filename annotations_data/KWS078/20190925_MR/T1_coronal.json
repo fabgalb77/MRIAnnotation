@@ -1,0 +1,15 @@
+[
+  {
+    "finding": "recess_stenosis",
+    "value": "mild",
+    "level": "L2",
+    "side": "",
+    "notes": "",
+    "relevant_to_decision": false,
+    "created_by": "fabio",
+    "created_at": "2025-03-26T14:24:21.665511",
+    "updated_by": "fabio",
+    "updated_at": "2025-03-26T14:24:21.671115",
+    "id": "1"
+  }
+]

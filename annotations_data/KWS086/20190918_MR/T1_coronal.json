@@ -1,0 +1,28 @@
+[
+  {
+    "finding": "disc_herniation",
+    "value": "severe",
+    "level": "L4-L5",
+    "side": "",
+    "notes": "",
+    "relevant_to_decision": true,
+    "created_by": "fabio",
+    "created_at": "2025-03-31T11:44:54.433796",
+    "updated_by": "fabio",
+    "updated_at": "2025-03-31T11:45:04.168145",
+    "id": "1"
+  },
+  {
+    "finding": "spondylolisthesis",
+    "value": "severe",
+    "level": "L1-L2",
+    "side": "",
+    "notes": "",
+    "relevant_to_decision": true,
+    "created_by": "fabio",
+    "created_at": "2025-03-31T11:45:04.159142",
+    "updated_by": "fabio",
+    "updated_at": "2025-03-31T11:45:04.168163",
+    "id": "2"
+  }
+]

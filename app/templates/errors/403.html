@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Access Forbidden | MRI Annotation Tool{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 text-center">
+        <div class="error-container">
+            <h1 class="display-1 text-danger">403</h1>
+            <h2 class="mb-4">Access Forbidden</h2>
+            <p class="lead mb-4">You do not have permission to access this resource.</p>
+            <a href="{{ url_for('main.dashboard' if 'username' in session else 'auth.login') }}" class="btn btn-primary">
+                <i class="fas fa-home me-2"></i>Return to Home
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Patient {{ patient_id }} | MRI Annotation Tool{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb Navigation -->
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
+        <li class="breadcrumb-item active">Patient {{ patient_id }}</li>
+    </ol>
+</nav>
+
+<!-- Patient Information Header -->
+<div class="row mb-4 align-items-center">
+    <div class="col-md-8">
+        <h2><i class="fas fa-user-injured me-2"></i>Patient: {{ patient_id }}</h2>
+        <p class="text-muted">Annotation progress and available MRI studies</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<!-- Annotation Status Bar -->
+<div class="annotation-status-bar status-{{ status.status }}">
+    <div class="row align-items-center">
+        <div class="col-md-8">
+            <h5 class="mb-1">
+                {% if status.status == 'not_annotated' %}
+                <i class="fas fa-exclamation-circle me-2"></i>Not Annotated
+                {% elif status.status == 'partially_annotated' %}
+                <i class="fas fa-hourglass-half me-2"></i>Partially Annotated
+                {% else %}
+                <i class="fas fa-check-circle me-2"></i>Annotation Completed
+                {% endif %}
+            </h5>
+            <p class="mb-0">
+                {% if status.annotated_by %}
+                Last updated by {{ status.annotated_by }} on {{ status.last_updated|format_date }}
+                {% else %}
+                This patient has not been annotated yet.
+                {% endif %}
+            </p>
+        </div>
+        <div class="col-md-4 text-end">
+            <div class="status-actions d-flex justify-content-end">
+                <button class="btn btn-success update-status" data-status="completed">
+                    <i class="fas fa-check me-1"></i>Mark Complete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MRI Studies List -->
+<h4 class="mb-3 mt-4"><i class="fas fa-calendar-alt me-2"></i>Available MRI Studies ({{ studies|length }})</h4>
+
+{% if studies %}
+<div class="card shadow">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fas fa-list me-2"></i>MRI Studies</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Study Date</th>
+                        <th>Study ID</th>
+                        <th>Series Count</th>
+                        <th>Status</th>
+                        <th>Last Updated</th>
+                        <th>Annotated By</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for study in studies %}
+                    <tr class="clickable-row" data-href="{{ url_for('main.study_detail', patient_id=patient_id, study_id=study.id) }}">
+                        <td>{{ study.date }}</td>
+                        <td><strong>{{ study.id }}</strong></td>
+                        <td>{{ study.series_count }}</td>
+                        <td>
+                            {% if study.status == 'not_annotated' %}
+                            <span class="badge bg-danger">Not Annotated</span>
+                            {% elif study.status == 'partially_annotated' %}
+                            <span class="badge bg-warning">In Progress</span>
+                            {% else %}
+                            <span class="badge bg-success">Completed</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if study.last_updated %}
+                            <span>{{ study.last_updated|format_date }}</span>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if study.annotated_by %}
+                            {{ study.annotated_by }}
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('main.study_detail', patient_id=patient_id, study_id=study.id) }}" class="btn btn-sm btn-primary">
+                                <i class="fas fa-eye me-1"></i>View
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-warning">
+    <i class="fas fa-exclamation-triangle me-2"></i>No MRI studies found for this patient.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Update patient status
+        $(".update-status").click(function() {
+            const status = $(this).data('status');
+            
+            $.ajax({
+                url: "{{ url_for('main.update_patient_status') }}",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({
+                    patient_id: "{{ patient_id }}",
+                    status: status
+                }),
+                success: function(response) {
+                    // Reload the page to reflect the new status
+                    location.reload();
+                },
+                error: function(error) {
+                    console.error("Error updating status:", error);
+                    alert("Failed to update status. Please try again.");
+                }
+            });
+        });
+        
+        // Enable clickable table rows
+        $(".clickable-row").click(function() {
+            window.location = $(this).data("href");
+        });
+    });
+</script>
+{% endblock %}

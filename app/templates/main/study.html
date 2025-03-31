@@ -1,0 +1,1034 @@
+{% extends "base.html" %}
+
+{% block title %}Study {{ study_id }} | MRI Annotation Tool{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Annotation panel styling */
+    .annotation-panel {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 15px;
+        background-color: #f8f9fa;
+    }
+    
+    .annotation-type-options {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease-out;
+        opacity: 0;
+    }
+    
+    .annotation-type-options.active {
+        max-height: 500px;
+        transition: max-height 0.5s ease-in;
+        opacity: 1;
+        margin-bottom: 1rem;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+    }
+    
+    .annotation-option-heading {
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+    }
+    
+    /* DICOM viewer positioning */
+    .dicom-controls {
+        position: sticky;
+        top: 0;
+        background-color: rgba(248, 249, 250, 0.9);
+        padding: 10px 0;
+        z-index: 10;
+        border-bottom: 1px solid #dee2e6;
+    }
+    
+    .placeholder-viewer {
+        min-height: 500px;
+    }
+    
+    /* Series card with annotations styling */
+    .series-card.has-annotations {
+        border-left: 3px solid #3498db;
+    }
+    
+    .annotation-count-indicator {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background-color: #3498db;
+        color: white;
+        border-radius: 50%;
+        width: 25px;
+        height: 25px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 0.8rem;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb Navigation -->
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('main.patient_detail', patient_id=patient_id) }}">Patient {{ patient_id }}</a></li>
+        <li class="breadcrumb-item active">Study {{ study_id }}</li>
+    </ol>
+</nav>
+
+<!-- Study Information Header -->
+<div class="row mb-4 align-items-center">
+    <div class="col-md-8">
+        <h2><i class="fas fa-calendar-alt me-2"></i>MRI Study: {{ study_date }}</h2>
+        <p class="text-muted">Patient ID: {{ patient_id }} | Study ID: {{ study_id }}</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <div class="d-flex justify-content-end gap-2">
+            <button id="spinenetButton" class="btn btn-info" title="View AI-generated annotations">
+                <i class="fas fa-robot me-1"></i>Show SpineNet Annotations
+            </button>
+            <a href="{{ url_for('main.patient_detail', patient_id=patient_id) }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Back to Patient
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Annotation Status Bar -->
+<div class="annotation-status-bar status-{{ status.status }}">
+    <div class="row align-items-center">
+        <div class="col-md-8">
+            <h5 class="mb-1">
+                {% if status.status == 'not_annotated' %}
+                <i class="fas fa-exclamation-circle me-2"></i>Not Annotated
+                {% elif status.status == 'partially_annotated' %}
+                <i class="fas fa-hourglass-half me-2"></i>Partially Annotated
+                {% else %}
+                <i class="fas fa-check-circle me-2"></i>Annotation Completed
+                {% endif %}
+            </h5>
+            <p class="mb-0">
+                {% if status.annotated_by %}
+                Last updated by {{ status.annotated_by }} on {{ status.last_updated|format_date }}
+                {% else %}
+                This study has not been annotated yet.
+                {% endif %}
+            </p>
+        </div>
+        <div class="col-md-4 text-end">
+            <div class="status-actions d-flex justify-content-end">
+                <button class="btn btn-success update-status" data-status="completed">
+                    <i class="fas fa-check me-1"></i>Mark Complete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MRI Series Grid -->
+<h4 class="mb-3 mt-4"><i class="fas fa-film me-2"></i>Available MRI Series ({{ series_list|length }})</h4>
+
+{% if series_list %}
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
+    {% for series in series_list %}
+    <div class="col">
+        <div class="card series-card h-100 position-relative {% if series.annotation_count > 0 %}has-annotations{% endif %}">
+            {% if series.annotation_count > 0 %}
+            <div class="annotation-count-indicator">{{ series.annotation_count }}</div>
+            {% endif %}
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">{{ series.clean_description }}</h5>
+                <div>
+                    <span class="badge bg-primary me-1" title="Annotations">
+                        <i class="fas fa-tag me-1"></i>{{ series.annotation_count }}
+                    </span>
+                    <span class="badge bg-info" title="DICOM Images">
+                        <i class="fas fa-film me-1"></i>{{ series.dicom_count }}
+                    </span>
+                </div>
+            </div>
+            
+            {% if series.sample_image %}
+            <div class="position-relative series-preview">
+                <img src="{{ url_for('main.serve_dicom', dicom_path=series.sample_image) }}" 
+                     class="card-img-top" alt="Preview of {{ series.name }}">
+                <div class="preview-overlay">
+                    <button class="btn btn-light btn-sm view-series">
+                        <i class="fas fa-expand me-1"></i>View Series
+                    </button>
+                </div>
+            </div>
+            {% else %}
+            <div class="card-img-top d-flex align-items-center justify-content-center">
+                <i class="fas fa-image dicom-placeholder"></i>
+            </div>
+            {% endif %}
+            
+            <div class="card-body">
+                <h6 class="card-title">{{ series.sequence_type }} ({{ series.orientation }})</h6>
+                <p class="card-text">
+                    <small class="text-muted">
+                        <i class="fas fa-layer-group me-1"></i>{{ series.dicom_count }} DICOM images
+                    </small>
+                    {% if series.annotation_count > 0 %}
+                    <small class="text-primary d-block mt-1">
+                        <i class="fas fa-tag me-1"></i>{{ series.annotation_count }} annotations
+                    </small>
+                    {% else %}
+                    <small class="text-muted d-block mt-1">
+                        <i class="fas fa-tag me-1"></i>No annotations yet
+                    </small>
+                    {% endif %}
+                    <small class="text-muted d-block mt-1">
+                        <i class="fas fa-folder me-1"></i>{{ series.name }}
+                    </small>
+                </p>
+            </div>
+            <div class="card-footer">
+                <button class="btn btn-primary btn-sm w-100 view-series-btn" 
+                        data-series="{{ series.name }}" 
+                        data-patient="{{ patient_id }}"
+                        data-study="{{ study_id }}">
+                    <i class="fas fa-edit me-1"></i>Annotate Series
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-warning">
+    <i class="fas fa-exclamation-triangle me-2"></i>No MRI series found for this study.
+</div>
+{% endif %}
+
+<!-- SpineNet Modal -->
+<div class="modal fade" id="spinenetModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-robot me-2"></i>SpineNet AI Annotations
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="spinenetLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Loading SpineNet annotations...</p>
+                </div>
+                
+                <div id="spinenetContent" style="display: none;">
+                    <div class="alert alert-info mb-3">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <span>These annotations were automatically generated by the SpineNet AI system and are meant to assist with manual annotation. Only findings with clinical relevance are shown.</span>
+                    </div>
+                    
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">Study Information</h6>
+                        </div>
+                        <div class="card-body">
+                            <p class="mb-1"><strong>Series:</strong> <span id="spinenetSeries"></span></p>
+                            <p class="mb-1"><strong>Processed on:</strong> <span id="spinenetDate"></span></p>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">Findings by Level</h6>
+                            <span class="badge bg-primary" id="findingCount">0 findings</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <div id="spinenetFindings">
+                                <!-- Findings will be inserted here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="spinenetNotAvailable" style="display: none;">
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <span id="spinenetErrorMessage">SpineNet annotations not available for this study.</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Enhanced Annotation Modal -->
+<div class="modal fade" id="annotationModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-edit me-2"></i>Annotate Series: <span id="modalSeriesName"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="image-viewer">
+                            <!-- DICOM controls -->
+                            <div class="dicom-controls mb-3" id="dicomControls">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <button class="btn btn-sm btn-outline-secondary" id="prevImage">
+                                            <i class="fas fa-chevron-left"></i> Previous
+                                        </button>
+                                        <span class="mx-2">Image <span id="currentImageNum">0</span> of <span id="totalImageNum">0</span></span>
+                                        <button class="btn btn-sm btn-outline-secondary" id="nextImage">
+                                            Next <i class="fas fa-chevron-right"></i>
+                                        </button>
+                                    </div>
+                                    <div>
+                                        <button class="btn btn-sm btn-outline-secondary" id="zoomIn">
+                                            <i class="fas fa-search-plus"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary" id="zoomOut">
+                                            <i class="fas fa-search-minus"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary" id="resetView">
+                                            <i class="fas fa-sync-alt"></i> Reset
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- DICOM viewer -->
+                            <div id="dicomContainer" class="dicom-container border rounded" style="height: 500px; background-color: #f8f9fa;"></div>
+                        </div>
+                    </div> 
+                    <div class="col-md-4">
+                        <div class="annotation-panel">
+                            <h5 class="mb-3">Annotation Panel</h5>
+                            
+                            <!-- Annotation Type Selection -->
+                            <div class="mb-3">
+                                <label class="form-label">Finding Type</label>
+                                <select class="form-select" id="findingType">
+                                    <option value="">-- Select Finding --</option>
+                                    <option value="disc_herniation">Disc Herniation</option>
+                                    <option value="central_stenosis">Central Stenosis</option>
+                                    <option value="foraminal_stenosis">Foraminal Stenosis</option>
+                                    <option value="recess_stenosis">Recess Stenosis</option>
+                                    <option value="spondylolisthesis">Spondylolisthesis</option>
+                                    <option value="signal">Signal Alteration</option>
+                                    <option value="endplate_lesion">Endplate Lesion</option>
+                                    <option value="degenerated_disc">Degenerated Disc</option>
+                                    <option value="fracture">Fracture</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            
+                            <!-- Dynamic options based on selection -->
+                            <!-- Disc Herniation, Central Stenosis, Foraminal Stenosis, Recess Stenosis, Spondylolisthesis -->
+                            <div class="annotation-type-options" id="severityOptions">
+                                <p class="annotation-option-heading">Severity</p>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="severity" id="severityMild" value="mild">
+                                    <label class="form-check-label" for="severityMild">Mild</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="severity" id="severityModerate" value="moderate">
+                                    <label class="form-check-label" for="severityModerate">Moderate</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="severity" id="severitySevere" value="severe">
+                                    <label class="form-check-label" for="severitySevere">Severe</label>
+                                </div>
+                            </div>
+                            
+                            <!-- Signal Alteration -->
+                            <div class="annotation-type-options" id="signalOptions">
+                                <p class="annotation-option-heading">Signal Type</p>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="signal" id="signalHyper" value="hyperintense">
+                                    <label class="form-check-label" for="signalHyper">Hyperintense</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="signal" id="signalHypo" value="hypointense">
+                                    <label class="form-check-label" for="signalHypo">Hypointense</label>
+                                </div>
+                            </div>
+                            
+                            <!-- Degenerated Disc -->
+                            <div class="annotation-type-options" id="pfirrmannOptions">
+                                <p class="annotation-option-heading">Pfirrmann Grade</p>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="pfirrmann" id="gradeI" value="I">
+                                    <label class="form-check-label" for="gradeI">Grade I</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="pfirrmann" id="gradeII" value="II">
+                                    <label class="form-check-label" for="gradeII">Grade II</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="pfirrmann" id="gradeIII" value="III">
+                                    <label class="form-check-label" for="gradeIII">Grade III</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="pfirrmann" id="gradeIV" value="IV">
+                                    <label class="form-check-label" for="gradeIV">Grade IV</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="pfirrmann" id="gradeV" value="V">
+                                    <label class="form-check-label" for="gradeV">Grade V</label>
+                                </div>
+                            </div>
+                            
+                            <!-- Endplate Lesion -->
+                            <div class="annotation-type-options" id="endplateOptions">
+                                <p class="annotation-option-heading">Lesion Type</p>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="endplate" id="smallDefect" value="small_defect">
+                                    <label class="form-check-label" for="smallDefect">Small Defect</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="endplate" id="schmorlsNode" value="schmorls_node">
+                                    <label class="form-check-label" for="schmorlsNode">Schmorl's Node</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="endplate" id="completelyDamaged" value="completely_damaged">
+                                    <label class="form-check-label" for="completelyDamaged">Completely Damaged</label>
+                                </div>
+                            </div>
+                            
+                            <!-- Fracture -->
+                            <div class="annotation-type-options" id="fractureOptions">
+                                <p class="annotation-option-heading">Fracture Type</p>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="fracture" id="osteoporotic" value="osteoporotic">
+                                    <label class="form-check-label" for="osteoporotic">Osteoporotic</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="fracture" id="traumatic" value="traumatic">
+                                    <label class="form-check-label" for="traumatic">Traumatic</label>
+                                </div>
+                            </div>
+                            
+                            <!-- Level Selector -->
+                            <div class="mb-3 mt-4">
+                                <label class="form-label">Vertebral/Disc Level</label>
+                                <select class="form-select" id="level">
+                                    <option value="">-- Select Level --</option>
+                                    <option value="L1">L1</option>
+                                    <option value="L1-L2">L1-L2</option>
+                                    <option value="L2">L2</option>
+                                    <option value="L2-L3">L2-L3</option>
+                                    <option value="L3">L3</option>
+                                    <option value="L3-L4">L3-L4</option>
+                                    <option value="L4">L4</option>
+                                    <option value="L4-L5">L4-L5</option>
+                                    <option value="L5">L5</option>
+                                    <option value="L5-S1">L5-S1</option>
+                                    <option value="S1">S1</option>
+                                </select>
+                            </div>
+                            
+                            <!-- Side Selector (when applicable) -->
+                            <div class="mb-3">
+                                <label class="form-label">Side</label>
+                                <select class="form-select" id="side">
+                                    <option value="">Not Applicable</option>
+                                    <option value="left">Left</option>
+                                    <option value="right">Right</option>
+                                    <option value="bilateral">Bilateral</option>
+                                </select>
+                            </div>
+                            
+                            <!-- Notes -->
+                            <div class="mb-3">
+                                <label class="form-label">Notes</label>
+                                <textarea class="form-control" id="notes" rows="3" placeholder="Additional details..."></textarea>
+                            </div>
+                            
+                            <!-- Relevant to Decision -->
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="relevantToDecision" checked>
+                                <label class="form-check-label" for="relevantToDecision">Relevant to decision</label>
+                                <small class="form-text text-muted d-block">
+                                    Uncheck if finding is not important for treatment decisions
+                                </small>
+                            </div>
+                            
+                            <!-- Add Annotation Button -->
+                            <div class="d-grid">
+                                <button class="btn btn-primary" id="addAnnotation">
+                                    <i class="fas fa-plus-circle me-1"></i>Add Annotation
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Annotations List -->
+                        <div class="mt-4">
+                            <h5>Current Annotations</h5>
+                            <div id="annotationsList" class="list-group mt-2">
+                                <!-- Annotations will be added here dynamically -->
+                                <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center text-muted">
+                                    <em>No annotations added yet</em>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-success" id="saveAllAnnotations">
+                    <i class="fas fa-save me-1"></i>Save All Annotations
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        const patientId = "{{ patient_id }}";
+        const studyId = "{{ study_id }}";
+        let currentSeriesName = "";
+        let existingAnnotations = [];
+        
+        // Update study status
+        $(".update-status").click(function() {
+            const status = $(this).data('status');
+            
+            $.ajax({
+                url: "{{ url_for('main.update_study_status') }}",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({
+                    patient_id: patientId,
+                    study_id: studyId,
+                    status: status
+                }),
+                success: function(response) {
+                    // Reload the page to reflect the new status
+                    location.reload();
+                },
+                error: function(error) {
+                    console.error("Error updating status:", error);
+                    alert("Failed to update status. Please try again.");
+                }
+            });
+        });
+        
+        // SpineNet Annotations
+        $("#spinenetButton").click(function() {
+            // Reset modal state
+            $("#spinenetLoading").show();
+            $("#spinenetContent").hide();
+            $("#spinenetNotAvailable").hide();
+            
+            // Show the modal
+            const spinenetModal = new bootstrap.Modal(document.getElementById('spinenetModal'));
+            spinenetModal.show();
+            
+            // Fetch SpineNet data
+            $.ajax({
+                url: `/api/spinenet/${patientId}/${studyId}`,
+                type: "GET",
+                success: function(response) {
+                    // Hide loading indicator
+                    $("#spinenetLoading").hide();
+                    
+                    if (!response.available) {
+                        // Show not available message
+                        $("#spinenetErrorMessage").text(response.message);
+                        $("#spinenetNotAvailable").show();
+                        return;
+                    }
+                    
+                    // Populate study information
+                    $("#spinenetSeries").text(response.series_description);
+                    $("#spinenetDate").text(formatDate(response.processed_on));
+                    
+                    // Clear previous findings
+                    $("#spinenetFindings").empty();
+
+                    // Count total findings
+                    let totalFindings = 0;
+                    
+                    // Build findings by level
+                    const levels = response.sorted_levels || Object.keys(response.findings).sort();
+                    if (levels.length === 0) {
+                        $("#spinenetFindings").html(
+                            '<div class="list-group-item text-center text-muted">' +
+                            '<em>No significant findings</em>' +
+                            '</div>'
+                        );
+                    } else {
+                        const listGroup = $('<div class="list-group list-group-flush"></div>');
+                        
+                        levels.forEach(function(level) {
+                            const findings = response.findings[level];
+                            if (findings.length > 0) {
+                                totalFindings += findings.length;
+                                
+                                const item = $(
+                                    '<div class="list-group-item">' +
+                                    '<h6 class="mb-1">' + level + '</h6>' +
+                                    '<ul class="mb-0"></ul>' +
+                                    '</div>'
+                                );
+                                
+                                const list = item.find('ul');
+                                findings.forEach(function(finding) {
+                                    list.append('<li>' + finding + '</li>');
+                                });
+                                
+                                listGroup.append(item);
+                            }
+                        });
+                        
+                        $("#spinenetFindings").append(listGroup);
+                    }
+                    
+                    // Update finding count
+                    $("#findingCount").text(totalFindings + " findings");
+                    
+                    // Show content
+                    $("#spinenetContent").show();
+                },
+                error: function(error) {
+                    // Hide loading indicator
+                    $("#spinenetLoading").hide();
+                    
+                    // Show error message
+                    $("#spinenetErrorMessage").text("Error loading SpineNet annotations. Please try again.");
+                    $("#spinenetNotAvailable").show();
+                    
+                    console.error("Error loading SpineNet annotations:", error);
+                }
+            });
+        });
+        
+        // Load annotations for a series
+        function loadSeriesAnnotations(seriesName) {
+            $.ajax({
+                url: `/api/annotations/${patientId}/${studyId}/${seriesName}`,
+                type: "GET",
+                success: function(response) {
+                    existingAnnotations = response.annotations || [];
+                    populateAnnotationsList(existingAnnotations);
+                },
+                error: function(error) {
+                    console.error("Error loading annotations:", error);
+                    existingAnnotations = [];
+                    populateAnnotationsList([]);
+                }
+            });
+        }
+        
+        // Populate annotations list
+        function populateAnnotationsList(annotations) {
+            const listElement = $("#annotationsList");
+            listElement.empty();
+            
+            if (annotations.length === 0) {
+                listElement.html('<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center text-muted"><em>No annotations added yet</em></div>');
+                return;
+            }
+            
+            // Create annotations items
+            annotations.forEach(function(annotation) {
+                // Format finding type and value
+                const findingType = annotation.finding;
+                let findingValue = annotation.value || "";
+                
+                // Get readable finding type name
+                let findingTypeText = findingType.replace(/_/g, ' ');
+                findingTypeText = findingTypeText.charAt(0).toUpperCase() + findingTypeText.slice(1);
+                
+                // Format finding details
+                let findingDetails = "";
+                if (findingValue) {
+                    if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis", "fracture"].includes(findingType)) {
+                        findingDetails = " - " + findingValue.charAt(0).toUpperCase() + findingValue.slice(1);
+                    } else if (findingType === "signal") {
+                        findingDetails = " - " + findingValue.charAt(0).toUpperCase() + findingValue.slice(1);
+                    } else if (findingType === "degenerated_disc") {
+                        findingDetails = " - Grade " + findingValue;
+                    } else if (findingType === "endplate_lesion") {
+                        const readableValue = findingValue.replace('_', ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                        findingDetails = " - " + readableValue;
+                    }
+                }
+                
+                // Side text
+                let sideText = "";
+                if (annotation.side && annotation.side !== "") {
+                    sideText = " - " + annotation.side.charAt(0).toUpperCase() + annotation.side.slice(1);
+                }
+                
+                // Notes
+                let notesText = "";
+                if (annotation.notes && annotation.notes.trim() !== "") {
+                    notesText = `<small class="text-muted d-block mt-1">${annotation.notes}</small>`;
+                }
+                
+                // Relevance badge
+                const isRelevant = annotation.relevant_to_decision !== false; // Default to true if not specified
+                const relevanceBadge = isRelevant ? 
+                    '<span class="badge bg-primary ms-2">Relevant</span>' : 
+                    '<span class="badge bg-secondary ms-2">Not Relevant</span>';
+                
+                const annotationItem = `
+                    <div class="list-group-item list-group-item-action ${!isRelevant ? 'text-muted' : ''}" data-id="${annotation.id || ''}">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">${findingTypeText}${findingDetails} @ ${annotation.level}${sideText} ${relevanceBadge}</h6>
+                            <button class="btn btn-sm btn-outline-danger delete-annotation">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                        ${notesText}
+                        <small class="text-muted d-block mt-1">
+                            <i class="fas fa-user me-1"></i>${annotation.created_by || 'Unknown'} 
+                            <i class="fas fa-clock ms-2 me-1"></i>${formatDate(annotation.created_at)}
+                        </small>
+                    </div>
+                `;
+                
+                listElement.append(annotationItem);
+            });
+        }
+        
+        // Helper to format timestamps
+        function formatDate(dateString) {
+            if (!dateString) return "Unknown";
+            
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleString();
+            } catch (e) {
+                return dateString;
+            }
+        }
+
+        // Open annotation modal
+        $(document).on("click", ".view-series-btn", function() {
+            const seriesName = $(this).data('series');
+            currentSeriesName = seriesName;
+            
+            $("#modalSeriesName").text(seriesName);
+            
+            // Reset annotation form
+            $("#findingType").val("");
+            $(".annotation-type-options").removeClass("active");
+            $('input[type=radio]').prop('checked', false);
+            $("#level").val("");
+            $("#side").val("");
+            $("#notes").val("");
+            $("#relevantToDecision").prop("checked", true);
+            
+            // Load existing annotations
+            loadSeriesAnnotations(seriesName);
+            
+            // Show the modal
+            const annotationModal = new bootstrap.Modal(document.getElementById('annotationModal'));
+            annotationModal.show();
+            
+            // Ensure the finding type change handler is properly set up
+            $("#findingType").off("change").on("change", function() {
+                console.log("Finding type changed:", $(this).val());
+                
+                // Hide all option divs first
+                $(".annotation-type-options").removeClass("active");
+                
+                // Show the relevant options based on selection
+                const selection = $(this).val();
+                
+                // Clear all radio selections
+                $('input[type=radio]').prop('checked', false);
+                
+                if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis"].includes(selection)) {
+                    $("#severityOptions").addClass("active");
+                } else if (selection === "signal") {
+                    $("#signalOptions").addClass("active");
+                } else if (selection === "degenerated_disc") {
+                    $("#pfirrmannOptions").addClass("active");
+                } else if (selection === "endplate_lesion") {
+                    $("#endplateOptions").addClass("active");
+                } else if (selection === "fracture") {
+                    $("#fractureOptions").addClass("active");
+                }
+                
+                // Control side dropdown visibility
+                if (["foraminal_stenosis", "recess_stenosis"].includes(selection)) {
+                    $("#side").prop("disabled", false);
+                } else {
+                    $("#side").val("");
+                    $("#side").prop("disabled", true);
+                }
+            });
+        });
+        
+        
+        // Add annotation to the list
+        $("#addAnnotation").click(function() {
+            const findingType = $("#findingType").val();
+            if (!findingType) {
+                alert("Please select a finding type");
+                return;
+            }
+            
+            // Get finding-specific details
+            let findingValue = "";
+            
+            if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis"].includes(findingType)) {
+                findingValue = $('input[name="severity"]:checked').val();
+                if (!findingValue) {
+                    alert("Please select a severity level");
+                    return;
+                }
+            } else if (findingType === "signal") {
+                findingValue = $('input[name="signal"]:checked').val();
+                if (!findingValue) {
+                    alert("Please select a signal type");
+                    return;
+                }
+            } else if (findingType === "degenerated_disc") {
+                findingValue = $('input[name="pfirrmann"]:checked').val();
+                if (!findingValue) {
+                    alert("Please select a Pfirrmann grade");
+                    return;
+                }
+            } else if (findingType === "endplate_lesion") {
+                findingValue = $('input[name="endplate"]:checked').val();
+                if (!findingValue) {
+                    alert("Please select an endplate lesion type");
+                    return;
+                }
+            } else if (findingType === "fracture") {
+                findingValue = $('input[name="fracture"]:checked').val();
+                if (!findingValue) {
+                    alert("Please select a fracture type");
+                    return;
+                }
+            }
+            
+            const level = $("#level").val();
+            if (!level) {
+                alert("Please select a vertebral/disc level");
+                return;
+            }
+            
+            // Get side (if applicable)
+            const side = $("#side").val();
+            
+            // Get notes
+            const notes = $("#notes").val();
+            
+            // Get relevant to decision checkbox
+            const relevantToDecision = $("#relevantToDecision").is(":checked");
+            
+            // Create annotation object
+            const newAnnotation = {
+                finding: findingType,
+                value: findingValue,
+                level: level,
+                side: side,
+                notes: notes,
+                relevant_to_decision: relevantToDecision
+            };
+            
+            // Add to local list (temporary)
+            $.ajax({
+                url: `/api/annotations/${patientId}/${studyId}/${currentSeriesName}`,
+                type: "PUT",
+                contentType: "application/json",
+                data: JSON.stringify(newAnnotation),
+                success: function(response) {
+                    // Reload annotations
+                    loadSeriesAnnotations(currentSeriesName);
+                    
+                    // Reset form for next annotation
+                    $("#findingType").val("");
+                    $(".annotation-type-options").removeClass("active");
+                    $('input[type=radio]').prop('checked', false);
+                    $("#level").val("");
+                    $("#side").val("");
+                    $("#notes").val("");
+                    $("#relevantToDecision").prop("checked", true);
+                    
+                    // Automatically update study status to "partially_annotated" if it's the first annotation
+                    if (existingAnnotations.length === 0) {
+                        // Make API call to update status
+                        $.ajax({
+                            url: "{{ url_for('main.update_study_status') }}",
+                            type: "POST",
+                            contentType: "application/json",
+                            data: JSON.stringify({
+                                patient_id: patientId,
+                                study_id: studyId,
+                                status: "partially_annotated"
+                            }),
+                            success: function() {
+                                // Update the UI to reflect the new status
+                                $(".annotation-status-bar")
+                                    .removeClass("status-not_annotated")
+                                    .addClass("status-partially_annotated");
+                                
+                                $(".annotation-status-bar h5.mb-1")
+                                    .html('<i class="fas fa-hourglass-half me-2"></i>Partially Annotated');
+                            },
+                            error: function(error) {
+                                console.error("Error updating status:", error);
+                            }
+                        });
+                    }
+                },
+                error: function(error) {
+                    console.error("Error adding annotation:", error);
+                    alert("Failed to add annotation. Please try again.");
+                }
+            });
+        });
+        
+        // Delete annotation
+        $(document).on("click", ".delete-annotation", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const annotationId = $(this).closest(".list-group-item").data('id');
+            
+            if (!annotationId) {
+                // Remove from UI only if no ID (not yet saved)
+                $(this).closest(".list-group-item").remove();
+                
+                // If no annotations left, show the "No annotations" message
+                if ($("#annotationsList").children().length === 0) {
+                    $("#annotationsList").html('<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center text-muted"><em>No annotations added yet</em></div>');
+                }
+                return;
+            }
+            
+            // Confirm deletion
+            if (confirm("Are you sure you want to delete this annotation?")) {
+                $.ajax({
+                    url: `/api/annotations/${patientId}/${studyId}/${currentSeriesName}/${annotationId}`,
+                    type: "DELETE",
+                    success: function(response) {
+                        // Reload annotations
+                        loadSeriesAnnotations(currentSeriesName);
+                        
+                        // Check if this was the last annotation and refresh the page
+                        // to update the status display if needed
+                        $.ajax({
+                            url: `/api/annotations/${patientId}/${studyId}/${currentSeriesName}`,
+                            type: "GET",
+                            success: function(response) {
+                                const annotations = response.annotations || [];
+                                if (annotations.length === 0) {
+                                    // If no annotations left, reload the page to update the status
+                                    location.reload();
+                                }
+                            }
+                        });
+                    },
+                    error: function(error) {
+                        console.error("Error deleting annotation:", error);
+                        alert("Failed to delete annotation. Please try again.");
+                    }
+                });
+            }
+        });
+        
+        // Save all annotations
+        $("#saveAllAnnotations").click(function() {
+            // Collect all annotations already loaded
+            if (existingAnnotations.length === 0) {
+                alert("No annotations to save.");
+                return;
+            }
+            
+            // Server already has the annotations, so just show success
+            alert("Annotations saved successfully!");
+            const modal = bootstrap.Modal.getInstance(document.getElementById('annotationModal'));
+            modal.hide();
+            
+            // Refresh the page to update annotation counts
+            location.reload();
+        });
+        
+        // Set up a handler for when the modal is hidden
+        $('#annotationModal').on('hidden.bs.modal', function () {
+            // Refresh the page to update annotation counts
+            location.reload();
+        });
+        
+        // Hover effect for series preview
+        $(".series-preview").hover(
+            function() {
+                $(this).find(".preview-overlay").fadeIn(200);
+            },
+            function() {
+                $(this).find(".preview-overlay").fadeOut(200);
+            }
+        );
+    });
+
+    // Function to ensure sub-menus appear correctly
+    function fixAnnotationSubmenus() {
+        console.log("Fixing annotation submenus");
+        
+        // When finding type is changed, make sure the appropriate options show
+        $("#findingType").off('change').on('change', function() {
+            console.log("Finding type changed:", $(this).val());
+            
+            // Hide all option divs first
+            $(".annotation-type-options").removeClass("active");
+            
+            // Show the relevant options based on selection
+            const selection = $(this).val();
+            
+            // Clear all radio selections
+            $('input[type=radio]').prop('checked', false);
+            
+            console.log("Activating options for:", selection);
+            
+            if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis"].includes(selection)) {
+                $("#severityOptions").addClass("active");
+                console.log("Showing severity options");
+            } else if (selection === "signal") {
+                $("#signalOptions").addClass("active");
+                console.log("Showing signal options");
+            } else if (selection === "degenerated_disc") {
+                $("#pfirrmannOptions").addClass("active");
+                console.log("Showing Pfirrmann options");
+            } else if (selection === "endplate_lesion") {
+                $("#endplateOptions").addClass("active");
+                console.log("Showing endplate options");
+            } else if (selection === "fracture") {
+                $("#fractureOptions").addClass("active");
+                console.log("Showing fracture options");
+            }
+            
+            // Control side dropdown visibility
+            if (["foraminal_stenosis", "recess_stenosis"].includes(selection)) {
+                $("#side").prop("disabled", false);
+            } else {
+                $("#side").val("");
+                $("#side").prop("disabled", true);
+            }
+        });
+    }
+</script>
+{% endblock %}

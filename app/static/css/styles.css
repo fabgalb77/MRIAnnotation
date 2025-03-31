@@ -1,0 +1,223 @@
+/* Global Styles */
+:root {
+    --primary: #2c3e50;
+    --secondary: #3498db;
+    --success: #2ecc71;
+    --warning: #f39c12;
+    --danger: #e74c3c;
+    --light: #ecf0f1;
+    --dark: #2c3e50;
+}
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Navigation */
+.navbar {
+    background-color: var(--primary);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.navbar-brand {
+    font-weight: bold;
+    color: white !important;
+}
+
+/* Main Content */
+.main-content {
+    padding: 2rem 0;
+    min-height: calc(100vh - 70px - 56px); /* Viewport height minus navbar and footer */
+}
+
+/* Cards */
+.card {
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease;
+    margin-bottom: 1.5rem;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.card-header {
+    background-color: var(--light);
+    font-weight: 600;
+    border-radius: 8px 8px 0 0 !important;
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: var(--secondary);
+    border-color: var(--secondary);
+}
+
+.btn-primary:hover {
+    background-color: #2980b9;
+    border-color: #2980b9;
+}
+
+/* Status Badges */
+.badge {
+    font-size: 0.85rem;
+    padding: 0.5em 0.75em;
+}
+
+/* Dashboard */
+.dashboard-header {
+    margin-bottom: 2rem;
+}
+
+.info-card {
+    transition: all 0.3s ease;
+}
+
+.info-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+}
+
+.info-card-icon {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+}
+
+/* Patient and Study Detail */
+.breadcrumb-item a {
+    text-decoration: none;
+}
+
+.annotation-status-bar {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+}
+
+.status-not_annotated {
+    background-color: #f8d7da;
+    border-left: 5px solid #dc3545;
+}
+
+.status-partially_annotated {
+    background-color: #fff3cd;
+    border-left: 5px solid #ffc107;
+}
+
+.status-completed {
+    background-color: #d1e7dd;
+    border-left: 5px solid #198754;
+}
+
+.status-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Series Cards */
+.series-card {
+    height: 100%;
+    transition: all 0.3s ease;
+}
+
+.series-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+}
+
+.series-preview {
+    position: relative;
+}
+
+.preview-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    display: none;
+}
+
+.series-preview:hover .preview-overlay {
+    opacity: 1;
+    display: flex;
+}
+
+.card-img-top {
+    height: 200px;
+    object-fit: cover;
+    background-color: #f8f9fa;
+}
+
+.dicom-placeholder {
+    font-size: 5rem;
+    color: #adb5bd;
+}
+
+/* Clickable Rows */
+.clickable-row {
+    cursor: pointer;
+}
+
+.clickable-row:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Annotation Modal */
+.placeholder-viewer {
+    height: 400px;
+    background-color: #f8f9fa;
+}
+
+/* Footer */
+.footer {
+    background-color: var(--light);
+    padding: 1rem;
+    text-align: center;
+    font-size: 0.9rem;
+    color: var(--dark);
+}
+
+/* Error Pages */
+.error-container {
+    padding: 3rem 0;
+}
+
+.error-container h1 {
+    font-size: 6rem;
+    font-weight: bold;
+}
+
+/* Study date formatting */
+.study-date {
+    font-weight: 500;
+    color: var(--dark);
+}
+
+/* Study list */
+.study-list {
+    margin-bottom: 2rem;
+}
+
+.study-item {
+    border-left: 3px solid var(--secondary);
+    padding-left: 1rem;
+    margin-bottom: 1rem;
+}
+
+.study-item:hover {
+    background-color: rgba(52, 152, 219, 0.05);
+}
+
+/* Series list in grid view */
+.series-grid {
+    margin-top: 2rem;
+}
