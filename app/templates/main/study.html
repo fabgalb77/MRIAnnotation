@@ -500,535 +500,867 @@
 
 {% block extra_js %}
 <script>
-    $(document).ready(function() {
-        const patientId = "{{ patient_id }}";
-        const studyId = "{{ study_id }}";
-        let currentSeriesName = "";
-        let existingAnnotations = [];
-        
-        // Update study status
-        $(".update-status").click(function() {
-            const status = $(this).data('status');
-            
-            $.ajax({
-                url: "{{ url_for('main.update_study_status') }}",
-                type: "POST",
-                contentType: "application/json",
-                data: JSON.stringify({
-                    patient_id: patientId,
-                    study_id: studyId,
-                    status: status
-                }),
-                success: function(response) {
-                    // Reload the page to reflect the new status
-                    location.reload();
-                },
-                error: function(error) {
-                    console.error("Error updating status:", error);
-                    alert("Failed to update status. Please try again.");
-                }
-            });
-        });
-        
-        // SpineNet Annotations
-        $("#spinenetButton").click(function() {
-            // Reset modal state
-            $("#spinenetLoading").show();
-            $("#spinenetContent").hide();
-            $("#spinenetNotAvailable").hide();
-            
-            // Show the modal
-            const spinenetModal = new bootstrap.Modal(document.getElementById('spinenetModal'));
-            spinenetModal.show();
-            
-            // Fetch SpineNet data
-            $.ajax({
-                url: `/api/spinenet/${patientId}/${studyId}`,
-                type: "GET",
-                success: function(response) {
-                    // Hide loading indicator
-                    $("#spinenetLoading").hide();
-                    
-                    if (!response.available) {
-                        // Show not available message
-                        $("#spinenetErrorMessage").text(response.message);
-                        $("#spinenetNotAvailable").show();
-                        return;
-                    }
-                    
-                    // Populate study information
-                    $("#spinenetSeries").text(response.series_description);
-                    $("#spinenetDate").text(formatDate(response.processed_on));
-                    
-                    // Clear previous findings
-                    $("#spinenetFindings").empty();
+$(document).ready(function() {
+    // Store references to patient and study from the page context
+    const pagePatientId = "{{ patient_id }}";
+    const pageStudyId = "{{ study_id }}";
+    
+    // Track the current series
+    let currentSeriesDetails = null;
+    let viewerInstance = null;
+    let existingAnnotations = [];
 
-                    // Count total findings
-                    let totalFindings = 0;
-                    
-                    // Build findings by level
-                    const levels = response.sorted_levels || Object.keys(response.findings).sort();
-                    if (levels.length === 0) {
-                        $("#spinenetFindings").html(
-                            '<div class="list-group-item text-center text-muted">' +
-                            '<em>No significant findings</em>' +
-                            '</div>'
-                        );
-                    } else {
-                        const listGroup = $('<div class="list-group list-group-flush"></div>');
-                        
-                        levels.forEach(function(level) {
-                            const findings = response.findings[level];
-                            if (findings.length > 0) {
-                                totalFindings += findings.length;
-                                
-                                const item = $(
-                                    '<div class="list-group-item">' +
-                                    '<h6 class="mb-1">' + level + '</h6>' +
-                                    '<ul class="mb-0"></ul>' +
-                                    '</div>'
-                                );
-                                
-                                const list = item.find('ul');
-                                findings.forEach(function(finding) {
-                                    list.append('<li>' + finding + '</li>');
-                                });
-                                
-                                listGroup.append(item);
-                            }
-                        });
-                        
-                        $("#spinenetFindings").append(listGroup);
-                    }
-                    
-                    // Update finding count
-                    $("#findingCount").text(totalFindings + " findings");
-                    
-                    // Show content
-                    $("#spinenetContent").show();
-                },
-                error: function(error) {
-                    // Hide loading indicator
-                    $("#spinenetLoading").hide();
-                    
-                    // Show error message
-                    $("#spinenetErrorMessage").text("Error loading SpineNet annotations. Please try again.");
-                    $("#spinenetNotAvailable").show();
-                    
-                    console.error("Error loading SpineNet annotations:", error);
-                }
-            });
-        });
+    // Update patient status
+    $(".update-status").click(function() {
+        const status = $(this).data('status');
         
-        // Load annotations for a series
-        function loadSeriesAnnotations(seriesName) {
-            $.ajax({
-                url: `/api/annotations/${patientId}/${studyId}/${seriesName}`,
-                type: "GET",
-                success: function(response) {
-                    existingAnnotations = response.annotations || [];
-                    populateAnnotationsList(existingAnnotations);
-                },
-                error: function(error) {
-                    console.error("Error loading annotations:", error);
-                    existingAnnotations = [];
-                    populateAnnotationsList([]);
-                }
-            });
-        }
-        
-        // Populate annotations list
-        function populateAnnotationsList(annotations) {
-            const listElement = $("#annotationsList");
-            listElement.empty();
-            
-            if (annotations.length === 0) {
-                listElement.html('<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center text-muted"><em>No annotations added yet</em></div>');
-                return;
-            }
-            
-            // Create annotations items
-            annotations.forEach(function(annotation) {
-                // Format finding type and value
-                const findingType = annotation.finding;
-                let findingValue = annotation.value || "";
-                
-                // Get readable finding type name
-                let findingTypeText = findingType.replace(/_/g, ' ');
-                findingTypeText = findingTypeText.charAt(0).toUpperCase() + findingTypeText.slice(1);
-                
-                // Format finding details
-                let findingDetails = "";
-                if (findingValue) {
-                    if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis", "fracture"].includes(findingType)) {
-                        findingDetails = " - " + findingValue.charAt(0).toUpperCase() + findingValue.slice(1);
-                    } else if (findingType === "signal") {
-                        findingDetails = " - " + findingValue.charAt(0).toUpperCase() + findingValue.slice(1);
-                    } else if (findingType === "degenerated_disc") {
-                        findingDetails = " - Grade " + findingValue;
-                    } else if (findingType === "endplate_lesion") {
-                        const readableValue = findingValue.replace('_', ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                        findingDetails = " - " + readableValue;
-                    }
-                }
-                
-                // Side text
-                let sideText = "";
-                if (annotation.side && annotation.side !== "") {
-                    sideText = " - " + annotation.side.charAt(0).toUpperCase() + annotation.side.slice(1);
-                }
-                
-                // Notes
-                let notesText = "";
-                if (annotation.notes && annotation.notes.trim() !== "") {
-                    notesText = `<small class="text-muted d-block mt-1">${annotation.notes}</small>`;
-                }
-                
-                // Relevance badge
-                const isRelevant = annotation.relevant_to_decision !== false; // Default to true if not specified
-                const relevanceBadge = isRelevant ? 
-                    '<span class="badge bg-primary ms-2">Relevant</span>' : 
-                    '<span class="badge bg-secondary ms-2">Not Relevant</span>';
-                
-                const annotationItem = `
-                    <div class="list-group-item list-group-item-action ${!isRelevant ? 'text-muted' : ''}" data-id="${annotation.id || ''}">
-                        <div class="d-flex w-100 justify-content-between">
-                            <h6 class="mb-1">${findingTypeText}${findingDetails} @ ${annotation.level}${sideText} ${relevanceBadge}</h6>
-                            <button class="btn btn-sm btn-outline-danger delete-annotation">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                        ${notesText}
-                        <small class="text-muted d-block mt-1">
-                            <i class="fas fa-user me-1"></i>${annotation.created_by || 'Unknown'} 
-                            <i class="fas fa-clock ms-2 me-1"></i>${formatDate(annotation.created_at)}
-                        </small>
-                    </div>
-                `;
-                
-                listElement.append(annotationItem);
-            });
-        }
-        
-        // Helper to format timestamps
-        function formatDate(dateString) {
-            if (!dateString) return "Unknown";
-            
-            try {
-                const date = new Date(dateString);
-                return date.toLocaleString();
-            } catch (e) {
-                return dateString;
-            }
-        }
-
-        // Open annotation modal
-        $(document).on("click", ".view-series-btn", function() {
-            const seriesName = $(this).data('series');
-            currentSeriesName = seriesName;
-            
-            $("#modalSeriesName").text(seriesName);
-            
-            // Reset annotation form
-            $("#findingType").val("");
-            $(".annotation-type-options").removeClass("active");
-            $('input[type=radio]').prop('checked', false);
-            $("#level").val("");
-            $("#side").val("");
-            $("#notes").val("");
-            $("#relevantToDecision").prop("checked", true);
-            
-            // Load existing annotations
-            loadSeriesAnnotations(seriesName);
-            
-            // Show the modal
-            const annotationModal = new bootstrap.Modal(document.getElementById('annotationModal'));
-            annotationModal.show();
-            
-            // Ensure the finding type change handler is properly set up
-            $("#findingType").off("change").on("change", function() {
-                console.log("Finding type changed:", $(this).val());
-                
-                // Hide all option divs first
-                $(".annotation-type-options").removeClass("active");
-                
-                // Show the relevant options based on selection
-                const selection = $(this).val();
-                
-                // Clear all radio selections
-                $('input[type=radio]').prop('checked', false);
-                
-                if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis"].includes(selection)) {
-                    $("#severityOptions").addClass("active");
-                } else if (selection === "signal") {
-                    $("#signalOptions").addClass("active");
-                } else if (selection === "degenerated_disc") {
-                    $("#pfirrmannOptions").addClass("active");
-                } else if (selection === "endplate_lesion") {
-                    $("#endplateOptions").addClass("active");
-                } else if (selection === "fracture") {
-                    $("#fractureOptions").addClass("active");
-                }
-                
-                // Control side dropdown visibility
-                if (["foraminal_stenosis", "recess_stenosis"].includes(selection)) {
-                    $("#side").prop("disabled", false);
-                } else {
-                    $("#side").val("");
-                    $("#side").prop("disabled", true);
-                }
-            });
-        });
-        
-        
-        // Add annotation to the list
-        $("#addAnnotation").click(function() {
-            const findingType = $("#findingType").val();
-            if (!findingType) {
-                alert("Please select a finding type");
-                return;
-            }
-            
-            // Get finding-specific details
-            let findingValue = "";
-            
-            if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis"].includes(findingType)) {
-                findingValue = $('input[name="severity"]:checked').val();
-                if (!findingValue) {
-                    alert("Please select a severity level");
-                    return;
-                }
-            } else if (findingType === "signal") {
-                findingValue = $('input[name="signal"]:checked').val();
-                if (!findingValue) {
-                    alert("Please select a signal type");
-                    return;
-                }
-            } else if (findingType === "degenerated_disc") {
-                findingValue = $('input[name="pfirrmann"]:checked').val();
-                if (!findingValue) {
-                    alert("Please select a Pfirrmann grade");
-                    return;
-                }
-            } else if (findingType === "endplate_lesion") {
-                findingValue = $('input[name="endplate"]:checked').val();
-                if (!findingValue) {
-                    alert("Please select an endplate lesion type");
-                    return;
-                }
-            } else if (findingType === "fracture") {
-                findingValue = $('input[name="fracture"]:checked').val();
-                if (!findingValue) {
-                    alert("Please select a fracture type");
-                    return;
-                }
-            }
-            
-            const level = $("#level").val();
-            if (!level) {
-                alert("Please select a vertebral/disc level");
-                return;
-            }
-            
-            // Get side (if applicable)
-            const side = $("#side").val();
-            
-            // Get notes
-            const notes = $("#notes").val();
-            
-            // Get relevant to decision checkbox
-            const relevantToDecision = $("#relevantToDecision").is(":checked");
-            
-            // Create annotation object
-            const newAnnotation = {
-                finding: findingType,
-                value: findingValue,
-                level: level,
-                side: side,
-                notes: notes,
-                relevant_to_decision: relevantToDecision
-            };
-            
-            // Add to local list (temporary)
-            $.ajax({
-                url: `/api/annotations/${patientId}/${studyId}/${currentSeriesName}`,
-                type: "PUT",
-                contentType: "application/json",
-                data: JSON.stringify(newAnnotation),
-                success: function(response) {
-                    // Reload annotations
-                    loadSeriesAnnotations(currentSeriesName);
-                    
-                    // Reset form for next annotation
-                    $("#findingType").val("");
-                    $(".annotation-type-options").removeClass("active");
-                    $('input[type=radio]').prop('checked', false);
-                    $("#level").val("");
-                    $("#side").val("");
-                    $("#notes").val("");
-                    $("#relevantToDecision").prop("checked", true);
-                    
-                    // Automatically update study status to "partially_annotated" if it's the first annotation
-                    if (existingAnnotations.length === 0) {
-                        // Make API call to update status
-                        $.ajax({
-                            url: "{{ url_for('main.update_study_status') }}",
-                            type: "POST",
-                            contentType: "application/json",
-                            data: JSON.stringify({
-                                patient_id: patientId,
-                                study_id: studyId,
-                                status: "partially_annotated"
-                            }),
-                            success: function() {
-                                // Update the UI to reflect the new status
-                                $(".annotation-status-bar")
-                                    .removeClass("status-not_annotated")
-                                    .addClass("status-partially_annotated");
-                                
-                                $(".annotation-status-bar h5.mb-1")
-                                    .html('<i class="fas fa-hourglass-half me-2"></i>Partially Annotated');
-                            },
-                            error: function(error) {
-                                console.error("Error updating status:", error);
-                            }
-                        });
-                    }
-                },
-                error: function(error) {
-                    console.error("Error adding annotation:", error);
-                    alert("Failed to add annotation. Please try again.");
-                }
-            });
-        });
-        
-        // Delete annotation
-        $(document).on("click", ".delete-annotation", function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            const annotationId = $(this).closest(".list-group-item").data('id');
-            
-            if (!annotationId) {
-                // Remove from UI only if no ID (not yet saved)
-                $(this).closest(".list-group-item").remove();
-                
-                // If no annotations left, show the "No annotations" message
-                if ($("#annotationsList").children().length === 0) {
-                    $("#annotationsList").html('<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center text-muted"><em>No annotations added yet</em></div>');
-                }
-                return;
-            }
-            
-            // Confirm deletion
-            if (confirm("Are you sure you want to delete this annotation?")) {
-                $.ajax({
-                    url: `/api/annotations/${patientId}/${studyId}/${currentSeriesName}/${annotationId}`,
-                    type: "DELETE",
-                    success: function(response) {
-                        // Reload annotations
-                        loadSeriesAnnotations(currentSeriesName);
-                        
-                        // Check if this was the last annotation and refresh the page
-                        // to update the status display if needed
-                        $.ajax({
-                            url: `/api/annotations/${patientId}/${studyId}/${currentSeriesName}`,
-                            type: "GET",
-                            success: function(response) {
-                                const annotations = response.annotations || [];
-                                if (annotations.length === 0) {
-                                    // If no annotations left, reload the page to update the status
-                                    location.reload();
-                                }
-                            }
-                        });
-                    },
-                    error: function(error) {
-                        console.error("Error deleting annotation:", error);
-                        alert("Failed to delete annotation. Please try again.");
-                    }
-                });
-            }
-        });
-        
-        // Save all annotations
-        $("#saveAllAnnotations").click(function() {
-            // Collect all annotations already loaded
-            if (existingAnnotations.length === 0) {
-                alert("No annotations to save.");
-                return;
-            }
-            
-            // Server already has the annotations, so just show success
-            alert("Annotations saved successfully!");
-            const modal = bootstrap.Modal.getInstance(document.getElementById('annotationModal'));
-            modal.hide();
-            
-            // Refresh the page to update annotation counts
-            location.reload();
-        });
-        
-        // Set up a handler for when the modal is hidden
-        $('#annotationModal').on('hidden.bs.modal', function () {
-            // Refresh the page to update annotation counts
-            location.reload();
-        });
-        
-        // Hover effect for series preview
-        $(".series-preview").hover(
-            function() {
-                $(this).find(".preview-overlay").fadeIn(200);
+        $.ajax({
+            url: "{{ url_for('main.update_study_status') }}",
+            type: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({
+                patient_id: pagePatientId,
+                study_id: pageStudyId,
+                status: status
+            }),
+            success: function(response) {
+                // Reload the page to reflect the new status
+                location.reload();
             },
-            function() {
-                $(this).find(".preview-overlay").fadeOut(200);
+            error: function(error) {
+                console.error("Error updating status:", error);
+                alert("Failed to update status. Please try again.");
             }
-        );
+        });
     });
-
-    // Function to ensure sub-menus appear correctly
-    function fixAnnotationSubmenus() {
-        console.log("Fixing annotation submenus");
+    
+    // SpineNet Annotations
+    $("#spinenetButton").click(function() {
+        // Reset modal state
+        $("#spinenetLoading").show();
+        $("#spinenetContent").hide();
+        $("#spinenetNotAvailable").hide();
         
-        // When finding type is changed, make sure the appropriate options show
-        $("#findingType").off('change').on('change', function() {
-            console.log("Finding type changed:", $(this).val());
-            
-            // Hide all option divs first
-            $(".annotation-type-options").removeClass("active");
-            
-            // Show the relevant options based on selection
-            const selection = $(this).val();
-            
-            // Clear all radio selections
-            $('input[type=radio]').prop('checked', false);
-            
-            console.log("Activating options for:", selection);
-            
-            if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis"].includes(selection)) {
-                $("#severityOptions").addClass("active");
-                console.log("Showing severity options");
-            } else if (selection === "signal") {
-                $("#signalOptions").addClass("active");
-                console.log("Showing signal options");
-            } else if (selection === "degenerated_disc") {
-                $("#pfirrmannOptions").addClass("active");
-                console.log("Showing Pfirrmann options");
-            } else if (selection === "endplate_lesion") {
-                $("#endplateOptions").addClass("active");
-                console.log("Showing endplate options");
-            } else if (selection === "fracture") {
-                $("#fractureOptions").addClass("active");
-                console.log("Showing fracture options");
+        // Show the modal
+        const spinenetModal = new bootstrap.Modal(document.getElementById('spinenetModal'));
+        spinenetModal.show();
+        
+        // Fetch SpineNet data
+        $.ajax({
+            url: `/api/spinenet/${pagePatientId}/${pageStudyId}`,
+            type: "GET",
+            success: function(response) {
+                // Hide loading indicator
+                $("#spinenetLoading").hide();
+                
+                if (!response.available) {
+                    // Show not available message
+                    $("#spinenetErrorMessage").text(response.message);
+                    $("#spinenetNotAvailable").show();
+                    return;
+                }
+                
+                // Populate study information
+                $("#spinenetSeries").text(response.series_description);
+                $("#spinenetDate").text(formatDate(response.processed_on));
+                
+                // Clear previous findings
+                $("#spinenetFindings").empty();
+
+                // Count total findings
+                let totalFindings = 0;
+                
+                // Build findings by level
+                const levels = response.sorted_levels || Object.keys(response.findings).sort();
+                if (levels.length === 0) {
+                    $("#spinenetFindings").html(
+                        '<div class="list-group-item text-center text-muted">' +
+                        '<em>No significant findings</em>' +
+                        '</div>'
+                    );
+                } else {
+                    const listGroup = $('<div class="list-group list-group-flush"></div>');
+                    
+                    levels.forEach(function(level) {
+                        const findings = response.findings[level];
+                        if (findings.length > 0) {
+                            totalFindings += findings.length;
+                            
+                            const item = $(
+                                '<div class="list-group-item">' +
+                                '<h6 class="mb-1">' + level + '</h6>' +
+                                '<ul class="mb-0"></ul>' +
+                                '</div>'
+                            );
+                            
+                            const list = item.find('ul');
+                            findings.forEach(function(finding) {
+                                list.append('<li>' + finding + '</li>');
+                            });
+                            
+                            listGroup.append(item);
+                        }
+                    });
+                    
+                    $("#spinenetFindings").append(listGroup);
+                }
+                
+                // Update finding count
+                $("#findingCount").text(totalFindings + " findings");
+                
+                // Show content
+                $("#spinenetContent").show();
+            },
+            error: function(error) {
+                // Hide loading indicator
+                $("#spinenetLoading").hide();
+                
+                // Show error message
+                $("#spinenetErrorMessage").text("Error loading SpineNet annotations. Please try again.");
+                $("#spinenetNotAvailable").show();
+                
+                console.error("Error loading SpineNet annotations:", error);
             }
-            
-            // Control side dropdown visibility
-            if (["foraminal_stenosis", "recess_stenosis"].includes(selection)) {
-                $("#side").prop("disabled", false);
-            } else {
-                $("#side").val("");
-                $("#side").prop("disabled", true);
+        });
+    });
+    
+    // Load annotations for a series
+    function loadSeriesAnnotations(seriesName) {
+        $.ajax({
+            url: `/api/annotations/${pagePatientId}/${pageStudyId}/${seriesName}`,
+            type: "GET",
+            success: function(response) {
+                existingAnnotations = response.annotations || [];
+                populateAnnotationsList(existingAnnotations);
+            },
+            error: function(error) {
+                console.error("Error loading annotations:", error);
+                existingAnnotations = [];
+                populateAnnotationsList([]);
             }
         });
     }
+    
+    // Populate annotations list
+    function populateAnnotationsList(annotations) {
+        const listElement = $("#annotationsList");
+        listElement.empty();
+        
+        if (annotations.length === 0) {
+            listElement.html('<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center text-muted"><em>No annotations added yet</em></div>');
+            return;
+        }
+        
+        // Create annotations items
+        annotations.forEach(function(annotation) {
+            // Format finding type and value
+            const findingType = annotation.finding;
+            let findingValue = annotation.value || "";
+            
+            // Get readable finding type name
+            let findingTypeText = findingType.replace(/_/g, ' ');
+            findingTypeText = findingTypeText.charAt(0).toUpperCase() + findingTypeText.slice(1);
+            
+            // Format finding details
+            let findingDetails = "";
+            if (findingValue) {
+                if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis", "fracture"].includes(findingType)) {
+                    findingDetails = " - " + findingValue.charAt(0).toUpperCase() + findingValue.slice(1);
+                } else if (findingType === "signal") {
+                    findingDetails = " - " + findingValue.charAt(0).toUpperCase() + findingValue.slice(1);
+                } else if (findingType === "degenerated_disc") {
+                    findingDetails = " - Grade " + findingValue;
+                } else if (findingType === "endplate_lesion") {
+                    const readableValue = findingValue.replace('_', ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                    findingDetails = " - " + readableValue;
+                }
+            }
+            
+            // Side text
+            let sideText = "";
+            if (annotation.side && annotation.side !== "") {
+                sideText = " - " + annotation.side.charAt(0).toUpperCase() + annotation.side.slice(1);
+            }
+            
+            // Notes
+            let notesText = "";
+            if (annotation.notes && annotation.notes.trim() !== "") {
+                notesText = `<small class="text-muted d-block mt-1">${annotation.notes}</small>`;
+            }
+            
+            // Relevance badge
+            const isRelevant = annotation.relevant_to_decision !== false; // Default to true if not specified
+            const relevanceBadge = isRelevant ? 
+                '<span class="badge bg-primary ms-2">Relevant</span>' : 
+                '<span class="badge bg-secondary ms-2">Not Relevant</span>';
+            
+            const annotationItem = `
+                <div class="list-group-item list-group-item-action ${!isRelevant ? 'text-muted' : ''}" data-id="${annotation.id || ''}">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h6 class="mb-1">${findingTypeText}${findingDetails} @ ${annotation.level}${sideText} ${relevanceBadge}</h6>
+                        <button class="btn btn-sm btn-outline-danger delete-annotation">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                    ${notesText}
+                    <small class="text-muted d-block mt-1">
+                        <i class="fas fa-user me-1"></i>${annotation.created_by || 'Unknown'} 
+                        <i class="fas fa-clock ms-2 me-1"></i>${formatDate(annotation.created_at)}
+                    </small>
+                </div>
+            `;
+            
+            listElement.append(annotationItem);
+        });
+    }
+    
+    // Helper to format timestamps
+    function formatDate(dateString) {
+        if (!dateString) return "Unknown";
+        
+        try {
+            const date = new Date(dateString);
+            return date.toLocaleString();
+        } catch (e) {
+            return dateString;
+        }
+    }
+
+    // Initialize DICOM viewer when a series button is clicked
+    $(document).on("click", ".view-series-btn", function() {
+        // Get data from the button
+        const seriesName = $(this).data('series');
+        const patientIdFromBtn = $(this).data('patient') || pagePatientId;
+        const studyIdFromBtn = $(this).data('study') || pageStudyId;
+        
+        console.log(`Button clicked for series: ${seriesName}, patient: ${patientIdFromBtn}, study: ${studyIdFromBtn}`);
+        
+        // Store the selected series details
+        currentSeriesDetails = {
+            patientId: patientIdFromBtn,
+            studyId: studyIdFromBtn,
+            seriesName: seriesName
+        };
+        
+        // Update the modal title
+        $("#modalSeriesName").text(seriesName);
+        
+        // Reset annotation form
+        $("#findingType").val("");
+        $(".annotation-type-options").removeClass("active");
+        $('input[type=radio]').prop('checked', false);
+        $("#level").val("");
+        $("#side").val("");
+        $("#notes").val("");
+        $("#relevantToDecision").prop("checked", true);
+        
+        // Load existing annotations
+        loadSeriesAnnotations(seriesName);
+        
+        // Show the modal
+        const annotationModal = new bootstrap.Modal(document.getElementById('annotationModal'));
+        annotationModal.show();
+    });
+
+    // Initialize the viewer when the modal is shown
+    $('#annotationModal').on('shown.bs.modal', function() {
+        console.log("Modal shown, preparing to initialize DICOM viewer");
+        
+        if (!currentSeriesDetails) {
+            console.error("No series details available");
+            return;
+        }
+        
+        console.log("Current series details:", currentSeriesDetails);
+        
+        // Create a direct instance without relying on the global DicomViewer class
+        try {
+            // Show a loading indicator in the container
+            $("#dicomContainer").html('<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-3">Loading DICOM images...</p></div>');
+            
+            // Manual implementation of DICOM viewer functionality
+            const container = document.getElementById('dicomContainer');
+            const controls = document.getElementById('dicomControls');
+            
+            if (!container) {
+                console.error("DICOM container not found");
+                return;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.className = 'dicom-canvas';
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            canvas.style.cursor = 'grab'; // Set cursor to indicate draggable
+
+            // Clear container and add canvas
+            container.innerHTML = '';
+            container.appendChild(canvas);
+
+            // Now call the setup function to add pan event handlers
+            viewer.setupPanEvents();
+            
+            // Setup loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'dicom-loading';
+            loadingDiv.innerHTML = `
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading DICOM images...</p>
+            `;
+            container.appendChild(loadingDiv);
+            loadingDiv.style.display = 'flex';
+            
+            // Create error message element
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'dicom-error';
+            errorDiv.innerHTML = `
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    <span class="error-text">Error loading DICOM images</span>
+                </div>
+            `;
+            container.appendChild(errorDiv);
+            errorDiv.style.display = 'none';
+            
+            // Setup viewer state
+            const viewer = {
+                images: [],
+                currentIndex: 0,
+                zoom: 1,
+                pan: { x: 0, y: 0 },
+                ctx: canvas.getContext('2d'),
+                isDragging: false,
+                lastMousePos: { x: 0, y: 0 },
+                
+                // Load DICOM images
+                loadSeries: function(patientId, studyId, seriesName) {
+                    console.log(`Loading series: ${patientId}/${studyId}/${seriesName}`);
+                    this.images = [];
+                    this.currentIndex = 0;
+                    
+                    // Show loading
+                    loadingDiv.style.display = 'flex';
+                    errorDiv.style.display = 'none';
+                    
+                    // Fetch DICOM files
+                    fetch(`/api/dicom-files/${patientId}/${studyId}/${seriesName}`)
+                        .then(response => {
+                            if (!response.ok) throw new Error('Failed to fetch DICOM file list');
+                            return response.json();
+                        })
+                        .then(data => {
+                            const dicomFiles = data.files || [];
+                            console.log(`Found ${dicomFiles.length} DICOM files`);
+                            
+                            if (dicomFiles.length === 0) {
+                                throw new Error('No DICOM files found in series');
+                            }
+                            
+                            // Preload all images
+                            const imagePromises = dicomFiles.map(file => {
+                                return new Promise((resolve, reject) => {
+                                    const img = new Image();
+                                    img.onload = () => resolve(img);
+                                    img.onerror = () => reject(new Error(`Failed to load image: ${file}`));
+                                    img.src = `/dicom/${patientId}/${studyId}/${seriesName}/${file}`;
+                                });
+                            });
+                            
+                            return Promise.all(imagePromises);
+                        })
+                        .then(loadedImages => {
+                            this.images = loadedImages;
+                            loadingDiv.style.display = 'none';
+                            
+                            // Update controls
+                            this.updateControls();
+                            
+                            // Render first image
+                            this.renderCurrentImage();
+                            
+                            console.log(`Loaded ${this.images.length} images`);
+                            
+                            // Enable controls
+                            if (controls) {
+                                const buttons = controls.querySelectorAll('button');
+                                buttons.forEach(btn => btn.disabled = false);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error loading DICOM series:', error);
+                            loadingDiv.style.display = 'none';
+                            errorDiv.style.display = 'block';
+                            errorDiv.querySelector('.error-text').textContent = error.message;
+                            
+                            // Disable controls
+                            if (controls) {
+                                const buttons = controls.querySelectorAll('button');
+                                buttons.forEach(btn => btn.disabled = true);
+                            }
+                        });
+                },
+                
+                // Update controls
+                updateControls: function() {
+                    if (!controls) return;
+                    
+                    const currentImageNum = controls.querySelector('#currentImageNum');
+                    const totalImageNum = controls.querySelector('#totalImageNum');
+                    const prevButton = controls.querySelector('#prevImage');
+                    const nextButton = controls.querySelector('#nextImage');
+                    
+                    if (currentImageNum) currentImageNum.textContent = this.images.length > 0 ? this.currentIndex + 1 : 0;
+                    if (totalImageNum) totalImageNum.textContent = this.images.length;
+                    
+                    if (prevButton) prevButton.disabled = this.images.length === 0 || this.currentIndex === 0;
+                    if (nextButton) nextButton.disabled = this.images.length === 0 || this.currentIndex === this.images.length - 1;
+                },
+                
+                // Render the current image
+                renderCurrentImage: function() {
+                    if (this.images.length === 0) {
+                        this.ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        this.ctx.fillStyle = '#f8f9fa';
+                        this.ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        this.ctx.fillStyle = '#adb5bd';
+                        this.ctx.font = '16px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.textBaseline = 'middle';
+                        this.ctx.fillText('No DICOM images loaded', canvas.width / 2, canvas.height / 2);
+                        return;
+                    }
+                    
+                    const img = this.images[this.currentIndex];
+                    
+                    // Clear canvas
+                    this.ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    this.ctx.fillStyle = '#000000';
+                    this.ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Calculate scaled dimensions
+                    const scale = Math.min(
+                        canvas.width / img.width,
+                        canvas.height / img.height
+                    );
+                    
+                    const scaledWidth = img.width * scale * this.zoom;
+                    const scaledHeight = img.height * scale * this.zoom;
+                    
+                    // Calculate centered position with pan
+                    const x = (canvas.width - scaledWidth) / 2 + this.pan.x;
+                    const y = (canvas.height - scaledHeight) / 2 + this.pan.y;
+                    
+                    // Draw image
+                    this.ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+                    
+                    // Update controls
+                    this.updateControls();
+                },
+                
+                // Navigation functions
+                prevImage: function() {
+                    if (this.currentIndex > 0) {
+                        this.currentIndex--;
+                        this.renderCurrentImage();
+                    }
+                },
+                
+                nextImage: function() {
+                    if (this.currentIndex < this.images.length - 1) {
+                        this.currentIndex++;
+                        this.renderCurrentImage();
+                    }
+                },
+                
+                // Zoom functions
+                zoomIn: function() {
+                    this.zoom = Math.min(5, this.zoom + 0.25);
+                    this.renderCurrentImage();
+                },
+                
+                zoomOut: function() {
+                    this.zoom = Math.max(0.5, this.zoom - 0.25);
+                    this.renderCurrentImage();
+                },
+
+                resetView: function() {
+                    this.zoom = 1;
+                    this.pan = { x: 0, y: 0 };
+                    this.renderCurrentImage();
+                },
+                
+                setupPanEvents: function() {
+                    const canvas = this.ctx.canvas;
+                    
+                    // Mouse events for panning
+                    canvas.addEventListener('mousedown', (event) => {
+                        this.isDragging = true;
+                        canvas.style.cursor = 'grabbing';
+                        this.lastMousePos = {
+                            x: event.clientX,
+                            y: event.clientY
+                        };
+                    });
+                    
+                    canvas.addEventListener('mousemove', (event) => {
+                        if (!this.isDragging) return;
+                        
+                        const deltaX = event.clientX - this.lastMousePos.x;
+                        const deltaY = event.clientY - this.lastMousePos.y;
+                        
+                        this.pan.x += deltaX;
+                        this.pan.y += deltaY;
+                        
+                        this.lastMousePos = {
+                            x: event.clientX,
+                            y: event.clientY
+                        };
+                        
+                        this.renderCurrentImage();
+                    });
+                    
+                    canvas.addEventListener('mouseup', () => {
+                        this.isDragging = false;
+                        canvas.style.cursor = 'grab';
+                    });
+                    
+                    canvas.addEventListener('mouseleave', () => {
+                        this.isDragging = false;
+                        canvas.style.cursor = 'grab';
+                    });
+                    
+                    // Touch events for mobile
+                    canvas.addEventListener('touchstart', (event) => {
+                        if (event.touches.length !== 1) return;
+                        
+                        this.isDragging = true;
+                        this.lastMousePos = {
+                            x: event.touches[0].clientX,
+                            y: event.touches[0].clientY
+                        };
+                        
+                        event.preventDefault();
+                    });
+                    
+                    canvas.addEventListener('touchmove', (event) => {
+                        if (!this.isDragging || event.touches.length !== 1) return;
+                        
+                        const deltaX = event.touches[0].clientX - this.lastMousePos.x;
+                        const deltaY = event.touches[0].clientY - this.lastMousePos.y;
+                        
+                        this.pan.x += deltaX;
+                        this.pan.y += deltaY;
+                        
+                        this.lastMousePos = {
+                            x: event.touches[0].clientX,
+                            y: event.touches[0].clientY
+                        };
+                        
+                        this.renderCurrentImage();
+                        event.preventDefault();
+                    });
+                    
+                    canvas.addEventListener('touchend', () => {
+                        this.isDragging = false;
+                    });
+                    
+                    canvas.addEventListener('touchcancel', () => {
+                        this.isDragging = false;
+                    });
+                }
+            };
+            
+            // Store the viewer instance
+            viewerInstance = viewer;
+
+            // Set up panning events
+            viewerInstance.setupPanEvents();
+            
+            // Load the series
+            const { patientId, studyId, seriesName } = currentSeriesDetails;
+            viewer.loadSeries(patientId, studyId, seriesName);
+            
+        } catch (error) {
+            console.error("Error initializing custom DICOM viewer:", error);
+        }
+    });
+
+    // Connect controls to the viewer
+    $(document).on('click', '#prevImage', function() {
+        console.log("Previous image button clicked");
+        if (viewerInstance) viewerInstance.prevImage();
+    });
+
+    $(document).on('click', '#nextImage', function() {
+        console.log("Next image button clicked");
+        if (viewerInstance) viewerInstance.nextImage();
+    });
+
+    $(document).on('click', '#zoomIn', function() {
+        console.log("Zoom in button clicked");
+        if (viewerInstance) viewerInstance.zoomIn();
+    });
+
+    $(document).on('click', '#zoomOut', function() {
+        console.log("Zoom out button clicked");
+        if (viewerInstance) viewerInstance.zoomOut();
+    });
+
+    $(document).on('click', '#resetView', function() {
+        console.log("Reset view button clicked");
+        if (viewerInstance) viewerInstance.resetView();
+    });
+    
+    // Add annotation to the list
+    $("#addAnnotation").click(function() {
+        const findingType = $("#findingType").val();
+        if (!findingType) {
+            alert("Please select a finding type");
+            return;
+        }
+        
+        // Get finding-specific details
+        let findingValue = "";
+        
+        if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis"].includes(findingType)) {
+            findingValue = $('input[name="severity"]:checked').val();
+            if (!findingValue) {
+                alert("Please select a severity level");
+                return;
+            }
+        } else if (findingType === "signal") {
+            findingValue = $('input[name="signal"]:checked').val();
+            if (!findingValue) {
+                alert("Please select a signal type");
+                return;
+            }
+        } else if (findingType === "degenerated_disc") {
+            findingValue = $('input[name="pfirrmann"]:checked').val();
+            if (!findingValue) {
+                alert("Please select a Pfirrmann grade");
+                return;
+            }
+        } else if (findingType === "endplate_lesion") {
+            findingValue = $('input[name="endplate"]:checked').val();
+            if (!findingValue) {
+                alert("Please select an endplate lesion type");
+                return;
+            }
+        } else if (findingType === "fracture") {
+            findingValue = $('input[name="fracture"]:checked').val();
+            if (!findingValue) {
+                alert("Please select a fracture type");
+                return;
+            }
+        }
+        
+        const level = $("#level").val();
+        if (!level) {
+            alert("Please select a vertebral/disc level");
+            return;
+        }
+        
+        // Get side (if applicable)
+        const side = $("#side").val();
+        
+        // Get notes
+        const notes = $("#notes").val();
+        
+        // Get relevant to decision checkbox
+        const relevantToDecision = $("#relevantToDecision").is(":checked");
+        
+        // Create annotation object
+        const newAnnotation = {
+            finding: findingType,
+            value: findingValue,
+            level: level,
+            side: side,
+            notes: notes,
+            relevant_to_decision: relevantToDecision
+        };
+        
+        // Add to local list (temporary)
+        $.ajax({
+            url: `/api/annotations/${pagePatientId}/${pageStudyId}/${currentSeriesDetails.seriesName}`,
+            type: "PUT",
+            contentType: "application/json",
+            data: JSON.stringify(newAnnotation),
+            success: function(response) {
+                // Reload annotations
+                loadSeriesAnnotations(currentSeriesDetails.seriesName);
+                
+                // Reset form for next annotation
+                $("#findingType").val("");
+                $(".annotation-type-options").removeClass("active");
+                $('input[type=radio]').prop('checked', false);
+                $("#level").val("");
+                $("#side").val("");
+                $("#notes").val("");
+                $("#relevantToDecision").prop("checked", true);
+                
+                // Automatically update study status to "partially_annotated" if it's the first annotation
+                if (existingAnnotations.length === 0) {
+                    // Make API call to update status
+                    $.ajax({
+                        url: "{{ url_for('main.update_study_status') }}",
+                        type: "POST",
+                        contentType: "application/json",
+                        data: JSON.stringify({
+                            patient_id: pagePatientId,
+                            study_id: pageStudyId,
+                            status: "partially_annotated"
+                        }),
+                        success: function() {
+                            // Update the UI to reflect the new status
+                            $(".annotation-status-bar")
+                                .removeClass("status-not_annotated")
+                                .addClass("status-partially_annotated");
+                            
+                            $(".annotation-status-bar h5.mb-1")
+                                .html('<i class="fas fa-hourglass-half me-2"></i>Partially Annotated');
+                        },
+                        error: function(error) {
+                            console.error("Error updating status:", error);
+                        }
+                    });
+                }
+            },
+            error: function(error) {
+                console.error("Error adding annotation:", error);
+                alert("Failed to add annotation. Please try again.");
+            }
+        });
+    });
+    
+    // Delete annotation
+    $(document).on("click", ".delete-annotation", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const annotationId = $(this).closest(".list-group-item").data('id');
+        
+        if (!annotationId) {
+            // Remove from UI only if no ID (not yet saved)
+            $(this).closest(".list-group-item").remove();
+            
+            // If no annotations left, show the "No annotations" message
+            if ($("#annotationsList").children().length === 0) {
+                $("#annotationsList").html('<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center text-muted"><em>No annotations added yet</em></div>');
+            }
+            return;
+        }
+        
+        // Confirm deletion
+        if (confirm("Are you sure you want to delete this annotation?")) {
+            $.ajax({
+                url: `/api/annotations/${pagePatientId}/${pageStudyId}/${currentSeriesDetails.seriesName}/${annotationId}`,
+                type: "DELETE",
+                success: function(response) {
+                    // Reload annotations
+                    loadSeriesAnnotations(currentSeriesDetails.seriesName);
+                    
+                    // Check if this was the last annotation and refresh the page
+                    // to update the status display if needed
+                    $.ajax({
+                        url: `/api/annotations/${pagePatientId}/${pageStudyId}/${currentSeriesDetails.seriesName}`,
+                        type: "GET",
+                        success: function(response) {
+                            const annotations = response.annotations || [];
+                            if (annotations.length === 0) {
+                                // If no annotations left, reload the page to update the status
+                                location.reload();
+                            }
+                        }
+                    });
+                },
+                error: function(error) {
+                    console.error("Error deleting annotation:", error);
+                    alert("Failed to delete annotation. Please try again.");
+                }
+            });
+        }
+    });
+    
+    // Save all annotations
+    $("#saveAllAnnotations").click(function() {
+        // Collect all annotations already loaded
+        if (!existingAnnotations || existingAnnotations.length === 0) {
+            alert("No annotations to save.");
+            return;
+        }
+        
+        // Server already has the annotations, so just show success
+        alert("Annotations saved successfully!");
+        const modal = bootstrap.Modal.getInstance(document.getElementById('annotationModal'));
+        modal.hide();
+        
+        // Refresh the page to update annotation counts
+        location.reload();
+    });
+    
+    // Set up a handler for when the modal is hidden
+    $('#annotationModal').on('hidden.bs.modal', function () {
+        // Refresh the page to update annotation counts
+        location.reload();
+    });
+    
+    // Hover effect for series preview
+    $(".series-preview").hover(
+        function() {
+            $(this).find(".preview-overlay").fadeIn(200);
+        },
+        function() {
+            $(this).find(".preview-overlay").fadeOut(200);
+        }
+    );
+
+    // Add an event listener for the annotation form
+    $("#findingType").change(function() {
+        fixAnnotationSubmenus();
+    });
+
+    // Make sure annotation submenus behave correctly
+    function fixAnnotationSubmenus() {
+        console.log("Fixing annotation submenus");
+        
+        // Hide all option divs first
+        $(".annotation-type-options").removeClass("active");
+        
+        // Show the relevant options based on selection
+        const selection = $("#findingType").val();
+        
+        // Clear all radio selections
+        $('input[type=radio]').prop('checked', false);
+        
+        console.log("Activating options for:", selection);
+        
+        if (["disc_herniation", "central_stenosis", "foraminal_stenosis", "recess_stenosis", "spondylolisthesis"].includes(selection)) {
+            $("#severityOptions").addClass("active");
+            console.log("Showing severity options");
+        } else if (selection === "signal") {
+            $("#signalOptions").addClass("active");
+            console.log("Showing signal options");
+        } else if (selection === "degenerated_disc") {
+            $("#pfirrmannOptions").addClass("active");
+            console.log("Showing Pfirrmann options");
+        } else if (selection === "endplate_lesion") {
+            $("#endplateOptions").addClass("active");
+            console.log("Showing endplate options");
+        } else if (selection === "fracture") {
+            $("#fractureOptions").addClass("active");
+            console.log("Showing fracture options");
+        }
+        
+        // Control side dropdown visibility
+        if (["foraminal_stenosis", "recess_stenosis"].includes(selection)) {
+            $("#side").prop("disabled", false);
+        } else {
+            $("#side").val("");
+            $("#side").prop("disabled", true);
+        }
+    }
+});
 </script>
 {% endblock %}
