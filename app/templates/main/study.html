@@ -296,14 +296,14 @@
                                         </button>
                                     </div>
                                     <div>
-                                        <button class="btn btn-sm btn-outline-secondary" id="zoomIn">
+                                        <button class="btn btn-sm btn-outline-secondary" id="zoomIn" title="Zoom In">
                                             <i class="fas fa-search-plus"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-outline-secondary" id="zoomOut">
+                                        <button class="btn btn-sm btn-outline-secondary" id="zoomOut" title="Zoom Out">
                                             <i class="fas fa-search-minus"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-outline-secondary" id="resetView">
-                                            <i class="fas fa-sync-alt"></i> Reset
+                                        <button class="btn btn-sm btn-outline-secondary" id="resetView" title="Reset View">
+                                            <i class="fas fa-sync-alt"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -762,7 +762,9 @@ $(document).ready(function() {
         annotationModal.show();
     });
 
-    // Initialize the viewer when the modal is shown
+    // This is the fixed section of code for the modal shown event handler
+    // Updated DICOM viewer with square container and brightness/contrast controls
+    // Updated DICOM viewer with square container and brightness/contrast controls
     $('#annotationModal').on('shown.bs.modal', function() {
         console.log("Modal shown, preparing to initialize DICOM viewer");
         
@@ -778,7 +780,7 @@ $(document).ready(function() {
             // Show a loading indicator in the container
             $("#dicomContainer").html('<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-3">Loading DICOM images...</p></div>');
             
-            // Manual implementation of DICOM viewer functionality
+            // Make container square by setting height equal to width
             const container = document.getElementById('dicomContainer');
             const controls = document.getElementById('dicomControls');
             
@@ -787,50 +789,18 @@ $(document).ready(function() {
                 return;
             }
 
-            const canvas = document.createElement('canvas');
-            canvas.className = 'dicom-canvas';
-            canvas.width = container.clientWidth;
-            canvas.height = container.clientHeight;
-            canvas.style.cursor = 'grab'; // Set cursor to indicate draggable
-
-            // Clear container and add canvas
-            container.innerHTML = '';
-            container.appendChild(canvas);
-
-            // Now call the setup function to add pan event handlers
-            viewer.setupPanEvents();
+            // Make the container square
+            const containerWidth = container.clientWidth;
+            container.style.height = `${containerWidth}px`;
             
-            // Setup loading indicator
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'dicom-loading';
-            loadingDiv.innerHTML = `
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <p class="mt-2">Loading DICOM images...</p>
-            `;
-            container.appendChild(loadingDiv);
-            loadingDiv.style.display = 'flex';
-            
-            // Create error message element
-            const errorDiv = document.createElement('div');
-            errorDiv.className = 'dicom-error';
-            errorDiv.innerHTML = `
-                <div class="alert alert-danger" role="alert">
-                    <i class="fas fa-exclamation-circle me-2"></i>
-                    <span class="error-text">Error loading DICOM images</span>
-                </div>
-            `;
-            container.appendChild(errorDiv);
-            errorDiv.style.display = 'none';
-            
-            // Setup viewer state
+            // Setup viewer object first before doing any DOM manipulation or referencing it
             const viewer = {
                 images: [],
                 currentIndex: 0,
                 zoom: 1,
                 pan: { x: 0, y: 0 },
-                ctx: canvas.getContext('2d'),
+                brightness: 0,  // Range: -1 to 1, 0 is default
+                contrast: 0,    // Range: -1 to 1, 0 is default
                 isDragging: false,
                 lastMousePos: { x: 0, y: 0 },
                 
@@ -918,6 +888,45 @@ $(document).ready(function() {
                     if (nextButton) nextButton.disabled = this.images.length === 0 || this.currentIndex === this.images.length - 1;
                 },
                 
+                // Apply brightness and contrast to the image
+                applyBrightnessContrast: function(ctx, canvas) {
+                    if (this.brightness === 0 && this.contrast === 0) return; // No adjustment needed
+                    
+                    // Get the image data
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imageData.data;
+                    
+                    // Map brightness and contrast from -1:1 range to usable values
+                    const brightness = Math.floor(this.brightness * 255);
+                    const contrastFactor = (1 + this.contrast) * (1 + this.contrast); // Squared for more natural feel
+                    
+                    // Apply brightness and contrast to each pixel
+                    for (let i = 0; i < data.length; i += 4) {
+                        // Skip transparent pixels
+                        if (data[i + 3] === 0) continue;
+                        
+                        // Apply brightness first (simple addition)
+                        data[i] += brightness;     // Red
+                        data[i + 1] += brightness; // Green
+                        data[i + 2] += brightness; // Blue
+                        
+                        // Apply contrast (adjust relative to center value 128)
+                        if (this.contrast !== 0) {
+                            data[i] = 128 + (data[i] - 128) * contrastFactor;
+                            data[i + 1] = 128 + (data[i + 1] - 128) * contrastFactor;
+                            data[i + 2] = 128 + (data[i + 2] - 128) * contrastFactor;
+                        }
+                        
+                        // Clamp values to 0-255 range
+                        data[i] = Math.max(0, Math.min(255, data[i]));
+                        data[i + 1] = Math.max(0, Math.min(255, data[i + 1]));
+                        data[i + 2] = Math.max(0, Math.min(255, data[i + 2]));
+                    }
+                    
+                    // Put the modified image data back
+                    ctx.putImageData(imageData, 0, 0);
+                },
+                
                 // Render the current image
                 renderCurrentImage: function() {
                     if (this.images.length === 0) {
@@ -952,11 +961,29 @@ $(document).ready(function() {
                     const x = (canvas.width - scaledWidth) / 2 + this.pan.x;
                     const y = (canvas.height - scaledHeight) / 2 + this.pan.y;
                     
-                    // Draw image
-                    this.ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+                    // Create a temporary canvas for brightness/contrast adjustments
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = canvas.width;
+                    tempCanvas.height = canvas.height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    
+                    // Draw the image to the temporary canvas
+                    tempCtx.drawImage(img, x, y, scaledWidth, scaledHeight);
+                    
+                    // Apply brightness and contrast adjustments
+                    this.applyBrightnessContrast(tempCtx, tempCanvas);
+                    
+                    // Draw the adjusted image to the main canvas
+                    this.ctx.drawImage(tempCanvas, 0, 0);
                     
                     // Update controls
                     this.updateControls();
+                    
+                    // Update brightness/contrast slider values
+                    const brightnessSlider = document.getElementById('brightnessSlider');
+                    const contrastSlider = document.getElementById('contrastSlider');
+                    if (brightnessSlider) brightnessSlider.value = this.brightness * 100;
+                    if (contrastSlider) contrastSlider.value = this.contrast * 100;
                 },
                 
                 // Navigation functions
@@ -988,6 +1015,31 @@ $(document).ready(function() {
                 resetView: function() {
                     this.zoom = 1;
                     this.pan = { x: 0, y: 0 };
+                    // Don't reset brightness and contrast to maintain settings between slices
+                    this.renderCurrentImage();
+                },
+                
+                // Brightness and contrast controls
+                adjustBrightness: function(value) {
+                    this.brightness = value;
+                    this.renderCurrentImage();
+                },
+                
+                adjustContrast: function(value) {
+                    this.contrast = value;
+                    this.renderCurrentImage();
+                },
+                
+                // Window level/width (common DICOM terminology for brightness/contrast)
+                adjustWindow: function(delta) {
+                    // A single control that affects both brightness and contrast
+                    // Positive delta: increase brightness and contrast
+                    // Negative delta: decrease brightness and contrast
+                    
+                    // Adjust brightness more than contrast for a more natural feel
+                    this.brightness = Math.max(-1, Math.min(1, this.brightness + delta * 0.1));
+                    this.contrast = Math.max(-0.5, Math.min(0.5, this.contrast + delta * 0.05));
+                    
                     this.renderCurrentImage();
                 },
                 
@@ -1031,6 +1083,15 @@ $(document).ready(function() {
                         canvas.style.cursor = 'grab';
                     });
                     
+                    // Mouse wheel for window adjustment
+                    canvas.addEventListener('wheel', (event) => {
+                        event.preventDefault();
+                        
+                        // Determine direction and apply window adjustment
+                        const delta = -Math.sign(event.deltaY) * 0.1; // Normalize and reduce sensitivity
+                        this.adjustWindow(delta);
+                    });
+                    
                     // Touch events for mobile
                     canvas.addEventListener('touchstart', (event) => {
                         if (event.touches.length !== 1) return;
@@ -1071,12 +1132,84 @@ $(document).ready(function() {
                     });
                 }
             };
+
+            // Create canvas element
+            const canvas = document.createElement('canvas');
+            canvas.className = 'dicom-canvas';
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            canvas.style.cursor = 'grab'; // Set cursor to indicate draggable
+
+            // Clear container and add canvas
+            container.innerHTML = '';
+            container.appendChild(canvas);
+
+            // Set the canvas context to the viewer
+            viewer.ctx = canvas.getContext('2d');
+            
+            // Setup loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'dicom-loading';
+            loadingDiv.innerHTML = `
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading DICOM images...</p>
+            `;
+            container.appendChild(loadingDiv);
+            loadingDiv.style.display = 'flex';
+            
+            // Create error message element
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'dicom-error';
+            errorDiv.innerHTML = `
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    <span class="error-text">Error loading DICOM images</span>
+                </div>
+            `;
+            container.appendChild(errorDiv);
+            errorDiv.style.display = 'none';
+            
+            // Create brightness/contrast controls
+            const windowControlsHtml = `
+                <div class="mt-2 window-controls">
+                    <div class="d-flex align-items-center">
+                        <span class="me-2 small"><i class="fas fa-adjust"></i></span>
+                        <input type="range" class="form-range" id="windowSlider" min="-100" max="100" value="0">
+                        <button class="btn btn-sm btn-outline-secondary ms-2" id="resetWindowBtn">
+                            <i class="fas fa-undo"></i>
+                        </button>
+                    </div>
+                    <div class="text-center mt-1">
+                        <small class="text-muted">Mouse wheel to adjust window level</small>
+                    </div>
+                </div>
+            `;
+            
+            // Add controls after DICOM container
+            $(windowControlsHtml).insertAfter(container);
+
+            // Now we can safely setup pan events
+            viewer.setupPanEvents();
+            
+            // Set up window slider
+            $('#windowSlider').on('input', function() {
+                const value = parseInt($(this).val()) / 100;
+                // Map slider position to window adjustment
+                viewer.adjustWindow(value - viewer.brightness);
+            });
+            
+            // Reset window button
+            $('#resetWindowBtn').click(function() {
+                viewer.brightness = 0;
+                viewer.contrast = 0;
+                $('#windowSlider').val(0);
+                viewer.renderCurrentImage();
+            });
             
             // Store the viewer instance
             viewerInstance = viewer;
-
-            // Set up panning events
-            viewerInstance.setupPanEvents();
             
             // Load the series
             const { patientId, studyId, seriesName } = currentSeriesDetails;

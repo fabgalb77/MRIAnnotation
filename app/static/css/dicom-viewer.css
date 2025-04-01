@@ -61,3 +61,60 @@
         margin-bottom: 10px;
     }
 }
+
+
+.dicom-container {
+    position: relative;
+    width: 100%;
+    /* Height will be set dynamically in JavaScript to maintain a square aspect ratio */
+    overflow: hidden;
+    background-color: #000;
+    border-radius: 4px;
+}
+
+.dicom-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+}
+
+.dicom-canvas:active {
+    cursor: grabbing;
+}
+
+.window-controls {
+    padding: 8px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    margin-top: 10px;
+}
+
+/* Tooltip for instructions */
+.window-tooltip {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 5px;
+    text-align: center;
+}
+
+/* Style for reset button */
+#resetWindowBtn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+/* Mobile-friendly adjustments */
+@media (max-width: 768px) {
+    .dicom-container {
+        height: 300px !important; /* Override the dynamic height on mobile */
+    }
+    
+    .window-controls {
+        padding: 4px;
+    }
+    
+    .window-tooltip {
+        display: none; /* Hide instructions on small screens to save space */
+    }
+}
